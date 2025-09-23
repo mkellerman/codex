@@ -559,9 +559,9 @@ mod tests {
     use codex_core::token_data::IdTokenInfo;
     use codex_core::token_data::TokenData;
     use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
-    use tempdir::TempDir;
 
     fn get_next_codex_home() -> PathBuf {
         static NEXT_CODEX_HOME_ID: AtomicUsize = AtomicUsize::new(0);
@@ -670,12 +670,20 @@ mod tests {
         ));
     }
 
+    fn fake_workspace_path(component: &str) -> PathBuf {
+        if cfg!(windows) {
+            let mut path = PathBuf::from(r"C:\workspace");
+            path.push(component);
+            path
+        } else {
+            PathBuf::from(format!("/workspace/{component}"))
+        }
+    }
+
     #[test]
     fn trust_path_respects_workspace_write_from_config() {
-        let tmp = TempDir::new().expect("create temp dir");
-        let project_dir = tmp.path().join("proj");
-        std::fs::create_dir_all(&project_dir).expect("create project dir");
-        let extra_root = tmp.path().join("extra-root");
+        let project_dir = fake_workspace_path("proj");
+        let extra_root = fake_workspace_path("extra-root");
 
         let mut projects = std::collections::HashMap::new();
         projects.insert(
@@ -695,41 +703,24 @@ mod tests {
             ..Default::default()
         };
 
-        // Build a Config instance and set its cwd to the trusted project dir
-        let mut cfg = Config::load_from_base_config_with_overrides(
-            config_toml.clone(),
-            ConfigOverrides::default(),
-            tmp.path().to_path_buf(),
-        )
-        .expect("load default config");
+        let mut cfg = make_config();
         cfg.cwd = project_dir.clone();
+        let mut expected_cfg = cfg.clone();
 
         let show_trust = determine_repo_trust_state(&mut cfg, &config_toml, None, None, None)
             .expect("determine trust state");
         assert!(!show_trust);
 
-        // expected config should have updated approval and sandbox mode:
-        // default isread-only, should now be workspace-write with
-        // workspace-write policy preserved
-        let expected_cfg = Config::load_from_base_config_with_overrides(
-            config_toml.clone(),
-            ConfigOverrides {
-                cwd: Some(project_dir.clone()),
-                sandbox_mode: Some(SandboxMode::WorkspaceWrite),
-                approval_policy: Some(codex_core::protocol::AskForApproval::OnRequest),
-                ..Default::default()
-            },
-            tmp.path().to_path_buf(),
-        )
-        .expect("load expected config");
+        expected_cfg.approval_policy = AskForApproval::OnRequest;
+        expected_cfg.sandbox_policy =
+            config_toml.derive_sandbox_policy(Some(SandboxMode::WorkspaceWrite));
+
         assert_eq!(cfg, expected_cfg);
     }
 
     #[test]
     fn trust_path_defaults_to_workspace_write_defaults() {
-        let tmp = TempDir::new().expect("create temp dir");
-        let project_dir = tmp.path().join("proj");
-        std::fs::create_dir_all(&project_dir).expect("create project dir");
+        let project_dir = fake_workspace_path("proj");
 
         let mut projects = std::collections::HashMap::new();
         projects.insert(
@@ -743,31 +734,15 @@ mod tests {
             ..Default::default()
         };
 
-        let mut cfg = Config::load_from_base_config_with_overrides(
-            config_toml.clone(),
-            ConfigOverrides {
-                cwd: Some(project_dir.clone()),
-                ..Default::default()
-            },
-            tmp.path().to_path_buf(),
-        )
-        .expect("load default config");
+        let mut cfg = make_config();
+        cfg.cwd = project_dir.clone();
+        let mut expected_cfg = cfg.clone();
 
         let show_trust = determine_repo_trust_state(&mut cfg, &config_toml, None, None, None)
             .expect("determine trust state");
         assert!(!show_trust);
 
-        // expected config should match defaults, with the default workspace-write policy
-        let mut expected_cfg = Config::load_from_base_config_with_overrides(
-            config_toml.clone(),
-            ConfigOverrides {
-                cwd: Some(project_dir.clone()),
-                approval_policy: Some(codex_core::protocol::AskForApproval::OnRequest),
-                ..Default::default()
-            },
-            tmp.path().to_path_buf(),
-        )
-        .expect("load expected config");
+        expected_cfg.approval_policy = AskForApproval::OnRequest;
         expected_cfg.sandbox_policy = SandboxPolicy::new_workspace_write_policy();
 
         assert_eq!(cfg, expected_cfg);
