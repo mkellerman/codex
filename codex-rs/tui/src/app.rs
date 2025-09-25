@@ -563,6 +563,137 @@ impl App {
                 );
                 self.chat.open_thread_popup_with_hint(items, Some(toolbar));
             }
+            AppEvent::ClearActiveThread => {
+                if self.threads_enabled {
+                    match &mut self.chat {
+                        ChatHost::Multi(m) => {
+                            let idx = m.active_index();
+                            let origin_opt = m.session(idx).and_then(|h| h.origin.clone());
+                            if let Some(origin) = origin_opt
+                                && let Some(path) = origin.parent_rollout_path.clone()
+                            {
+                                // Child thread: rebuild from base rollout.
+                                match self
+                                    .server
+                                    .resume_conversation_from_rollout(
+                                        self.config.clone(),
+                                        path,
+                                        self.auth_manager.clone(),
+                                    )
+                                    .await
+                                {
+                                    Ok(new_conv) => {
+                                        let init = crate::chatwidget::ChatWidgetInit {
+                                            config: self.config.clone(),
+                                            frame_requester: tui.frame_requester(),
+                                            app_event_tx: self.app_event_tx.clone(),
+                                            initial_prompt: None,
+                                            initial_images: Vec::new(),
+                                            enhanced_keys_supported: self.enhanced_keys_supported,
+                                            auth_manager: self.auth_manager.clone(),
+                                        };
+                                        let widget =
+                                            crate::chatwidget::ChatWidget::new_from_existing(
+                                                init,
+                                                new_conv.conversation,
+                                                new_conv.session_configured,
+                                            );
+                                        if let Some(handle) = m.session_mut(idx) {
+                                            let title = handle.title.clone();
+                                            let display = handle.display_title.clone();
+                                            let mut origin_new = handle.origin.clone();
+                                            if let Some(o) = &mut origin_new {
+                                                o.parent_conversation_id =
+                                                    origin.parent_conversation_id;
+                                            }
+                                            *handle =
+                                                super::shims::thread::manager::SessionHandle {
+                                                    widget,
+                                                    transcript_cells: Vec::new(),
+                                                    title,
+                                                    display_title: display,
+                                                    conversation_id: None,
+                                                    unread_count: 0,
+                                                    origin: origin_new,
+                                                    session_id: handle.session_id,
+                                                    auto_name_kind: handle.auto_name_kind,
+                                                };
+                                        }
+                                    }
+                                    Err(err) => {
+                                        self.chat.add_error_message(format!(
+                                            "Failed to clear thread: {err}"
+                                        ));
+                                    }
+                                }
+                            } else {
+                                // Top-level session: rebuild fresh in place.
+                                let init = crate::chatwidget::ChatWidgetInit {
+                                    config: self.config.clone(),
+                                    frame_requester: tui.frame_requester(),
+                                    app_event_tx: self.app_event_tx.clone(),
+                                    initial_prompt: None,
+                                    initial_images: Vec::new(),
+                                    enhanced_keys_supported: self.enhanced_keys_supported,
+                                    auth_manager: self.auth_manager.clone(),
+                                };
+                                let widget = ChatWidget::new(init, self.server.clone());
+                                if let Some(handle) = m.session_mut(idx) {
+                                    let title = handle.title.clone();
+                                    let display = handle.display_title.clone();
+                                    *handle = super::shims::thread::manager::SessionHandle {
+                                        widget,
+                                        transcript_cells: Vec::new(),
+                                        title,
+                                        display_title: display,
+                                        conversation_id: None,
+                                        unread_count: 0,
+                                        origin: None,
+                                        session_id: handle.session_id,
+                                        auto_name_kind: handle.auto_name_kind,
+                                    };
+                                }
+                            }
+                            // Refresh decorations
+                            let mut header_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                            let mut status_line: Option<ratatui::text::Line<'static>> = None;
+                            self.shims
+                                .augment_header_with_host(&mut header_lines, &self.chat);
+                            self.shims
+                                .augment_status_line_with_host(&mut status_line, &self.chat);
+                            self.chat.set_shim_decorations(header_lines, status_line);
+                            tui.frame_requester().schedule_frame();
+                        }
+                        _ => {
+                            // Single-host with threads enabled: clear to a fresh session.
+                            let init = crate::chatwidget::ChatWidgetInit {
+                                config: self.config.clone(),
+                                frame_requester: tui.frame_requester(),
+                                app_event_tx: self.app_event_tx.clone(),
+                                initial_prompt: None,
+                                initial_images: Vec::new(),
+                                enhanced_keys_supported: self.enhanced_keys_supported,
+                                auth_manager: self.auth_manager.clone(),
+                            };
+                            let widget = ChatWidget::new(init, self.server.clone());
+                            self.chat = ChatHost::from_initial(widget, self.threads_enabled);
+                            let mut header_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                            let mut status_line: Option<ratatui::text::Line<'static>> = None;
+                            self.shims
+                                .augment_header_with_host(&mut header_lines, &self.chat);
+                            self.shims
+                                .augment_status_line_with_host(&mut status_line, &self.chat);
+                            self.chat.set_shim_decorations(header_lines, status_line);
+                            tui.frame_requester().schedule_frame();
+                        }
+                    }
+                } else {
+                    self.chat.add_info_message(
+                        "`/clear` is only available when threads are enabled".to_string(),
+                        None,
+                    );
+                }
+            }
 
             AppEvent::ForkChildOfActive => {
                 let parent_idx = self.chat.active_index();
@@ -795,6 +926,13 @@ impl App {
             ChatHost::Multi(m) if self.threads_enabled => {
                 let id = m.next_session_id();
                 let idx = m.add_child_session(pending.parent_idx, widget, id);
+                // Record base rollout path so the child can be reset via /clear.
+                if let Some(handle) = m.session_mut(idx)
+                    && let Some(origin) = &mut handle.origin
+                {
+                    origin.parent_conversation_id = pending.base_id;
+                    origin.parent_rollout_path = Some(ev.path.clone());
+                }
                 m.switch_active(idx);
             }
             _ => {

@@ -65,6 +65,7 @@ mod slash_command;
 mod status_indicator_widget;
 mod streaming;
 mod text_formatting;
+mod threads_feature;
 mod tui;
 mod ui_consts;
 mod user_approval_widget;
@@ -420,6 +421,11 @@ async fn run_ratatui_app(
         threads,
         ..
     } = cli;
+
+    if threads {
+        // Advertise threads-enabled to UI components that need conditional features.
+        crate::threads_feature::set_threads_enabled(true);
+    }
 
     // Inject title-management user instructions when thread shims are enabled.
     if threads {

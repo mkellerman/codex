@@ -1058,6 +1058,10 @@ impl ChatWidget {
             SlashCommand::Session => {
                 self.app_event_tx.send(AppEvent::OpenThreadManager);
             }
+            SlashCommand::Clear => {
+                // Ask App to clear this thread's context since fork (if applicable).
+                self.app_event_tx.send(AppEvent::ClearActiveThread);
+            }
             SlashCommand::Init => {
                 const INIT_PROMPT: &str = include_str!("../prompt_for_init_command.md");
                 self.submit_text_message(INIT_PROMPT.to_string());

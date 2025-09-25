@@ -114,7 +114,7 @@ impl ChatHost {
     pub(crate) fn handle_codex_event(&mut self, event: Event) {
         match self {
             ChatHost::Single(w) => w.handle_codex_event(event),
-            ChatHost::Multi(_) => self.active_widget_mut().handle_codex_event(event),
+            ChatHost::Multi(m) => m.handle_codex_event_multi(event),
         }
     }
 

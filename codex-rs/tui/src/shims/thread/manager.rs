@@ -19,6 +19,8 @@ pub(crate) struct ThreadOrigin {
     pub parent_conversation_id: Option<ConversationId>,
     #[allow(dead_code)]
     pub parent_snapshot_len: usize,
+    #[allow(dead_code)]
+    pub parent_rollout_path: Option<std::path::PathBuf>,
 }
 
 pub(crate) struct SessionHandle {
@@ -40,6 +42,7 @@ pub(crate) struct SessionHandle {
 pub(crate) struct SessionManager {
     sessions: Vec<SessionHandle>,
     active_index: usize,
+    event_route: std::collections::HashMap<String, usize>,
 }
 
 impl SessionManager {
@@ -59,6 +62,7 @@ impl SessionManager {
         Self {
             sessions: vec![handle],
             active_index: 0,
+            event_route: std::collections::HashMap::new(),
         }
     }
 
@@ -169,6 +173,7 @@ impl SessionManager {
             parent_index,
             parent_conversation_id: None,
             parent_snapshot_len: 0,
+            parent_rollout_path: None,
         };
         // Inherit the parent's title for a forked thread; otherwise leave empty.
         let inherited_title = self
@@ -217,6 +222,24 @@ impl SessionManager {
             true
         } else {
             false
+        }
+    }
+
+    pub(crate) fn handle_codex_event_multi(&mut self, event: codex_core::protocol::Event) {
+        let id = event.id.clone();
+        let idx = self
+            .event_route
+            .get(&id)
+            .copied()
+            .unwrap_or(self.active_index);
+        if let Some(handle) = self.sessions.get_mut(idx) {
+            if let codex_core::protocol::EventMsg::SessionConfigured(ev) = &event.msg {
+                handle.conversation_id = Some(ev.session_id);
+            }
+            handle.widget.handle_codex_event(event);
+            self.event_route.insert(id, idx);
+        } else if let Some(handle) = self.sessions.get_mut(self.active_index) {
+            handle.widget.handle_codex_event(event);
         }
     }
 

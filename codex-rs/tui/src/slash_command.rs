@@ -15,6 +15,7 @@ pub enum SlashCommand {
     Model,
     Thread,
     Session,
+    Clear,
     Approvals,
     Review,
     New,
@@ -37,6 +38,7 @@ impl SlashCommand {
         match self {
             SlashCommand::New => "start a new chat during a conversation",
             SlashCommand::Session => "manage sessions and threads",
+            SlashCommand::Clear => "clear this thread's context (keep pre-fork)",
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Review => "review my current changes and find issues",
@@ -68,6 +70,7 @@ impl SlashCommand {
             SlashCommand::New => true,
             SlashCommand::Thread => true,
             SlashCommand::Session => true,
+            SlashCommand::Clear => true,
             SlashCommand::Init
             | SlashCommand::Compact
             | SlashCommand::Undo
@@ -90,11 +93,15 @@ impl SlashCommand {
 /// Return all built-in commands in a Vec paired with their command string.
 pub fn built_in_slash_commands() -> Vec<(&'static str, SlashCommand)> {
     let show_beta_features = beta_features_enabled();
+    let threads_enabled = crate::threads_feature::is_threads_enabled();
 
     SlashCommand::iter()
         .filter(|cmd| {
             if *cmd == SlashCommand::Undo {
                 show_beta_features
+            } else if *cmd == SlashCommand::Clear {
+                // Only show /clear in threads mode
+                threads_enabled
             } else {
                 true
             }

@@ -88,4 +88,7 @@ pub(crate) enum AppEvent {
 
     /// Create a child thread under the current active session (fork full context).
     ForkChildOfActive,
+
+    /// Clear the active thread's context since fork (keep pre-fork history).
+    ClearActiveThread,
 }
