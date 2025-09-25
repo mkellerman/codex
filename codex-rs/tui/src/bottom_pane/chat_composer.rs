@@ -875,9 +875,23 @@ impl ChatComposer {
     /// Handle generic Input events that modify the textarea content.
     fn handle_input_basic(&mut self, input: KeyEvent) -> (InputResult, bool) {
         // If we have a buffered non-bracketed paste burst and enough time has
-        // elapsed since the last char, flush it before handling a new input.
+        // elapsed since the last char, flush it before handling a new input —
+        // except for plain Char inputs. For plain Char, let the burst
+        // detector decide first so we don't prematurely insert a pending
+        // first fast char as typed text.
         let now = Instant::now();
-        self.handle_paste_burst_flush(now);
+        let is_plain_char = matches!(
+            input,
+            KeyEvent {
+                code: KeyCode::Char(_),
+                modifiers,
+                ..
+            } if !modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT)
+        );
+        if !is_plain_char {
+            self.handle_paste_burst_flush(now);
+        }
 
         // If we're capturing a burst and receive Enter, accumulate it instead of inserting.
         if matches!(input.code, KeyCode::Enter)
