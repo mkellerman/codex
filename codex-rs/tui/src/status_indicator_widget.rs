@@ -91,6 +91,14 @@ impl StatusIndicatorWidget {
         total.saturating_add(1) // spacer line
     }
 
+    /// Return a one-line snapshot of the current status header with elapsed time.
+    /// Example: "Working (1m 23s)".
+    pub(crate) fn snapshot(&self) -> String {
+        let elapsed = self.elapsed_seconds();
+        let pretty_elapsed = fmt_elapsed_compact(elapsed);
+        format!("{} ({pretty_elapsed})", self.header)
+    }
+
     pub(crate) fn interrupt(&self) {
         self.app_event_tx.send(AppEvent::CodexOp(Op::Interrupt));
     }

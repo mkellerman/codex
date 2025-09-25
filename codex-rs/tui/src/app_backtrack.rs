@@ -83,7 +83,7 @@ impl App {
     /// Handle global Esc presses for backtracking when no overlay is present.
     pub(crate) fn handle_backtrack_esc_key(&mut self, tui: &mut tui::Tui) {
         // Only handle backtracking when composer is empty to avoid clobbering edits.
-        if self.chat_widget.composer_is_empty() {
+        if self.chat.composer_is_empty() {
             if !self.backtrack.primed {
                 self.prime_backtrack();
             } else if self.overlay.is_none() {
@@ -144,8 +144,8 @@ impl App {
     fn prime_backtrack(&mut self) {
         self.backtrack.primed = true;
         self.backtrack.nth_user_message = usize::MAX;
-        self.backtrack.base_id = self.chat_widget.conversation_id();
-        self.chat_widget.show_esc_backtrack_hint();
+        self.backtrack.base_id = self.chat.conversation_id();
+        self.chat.show_esc_backtrack_hint();
     }
 
     /// Open overlay and begin backtrack preview flow (first step + highlight).
@@ -153,14 +153,14 @@ impl App {
         self.open_transcript_overlay(tui);
         self.backtrack.overlay_preview_active = true;
         // Composer is hidden by overlay; clear its hint.
-        self.chat_widget.clear_esc_backtrack_hint();
+        self.chat.clear_esc_backtrack_hint();
         self.step_backtrack_and_highlight(tui);
     }
 
     /// When overlay is already open, begin preview mode and select latest user message.
     fn begin_overlay_backtrack_preview(&mut self, tui: &mut tui::Tui) {
         self.backtrack.primed = true;
-        self.backtrack.base_id = self.chat_widget.conversation_id();
+        self.backtrack.base_id = self.chat.conversation_id();
         self.backtrack.overlay_preview_active = true;
         let count = user_count(&self.transcript_cells);
         if let Some(last) = count.checked_sub(1) {
@@ -265,7 +265,7 @@ impl App {
         self.backtrack.base_id = None;
         self.backtrack.nth_user_message = usize::MAX;
         // In case a hint is somehow still visible (e.g., race with overlay open/close).
-        self.chat_widget.clear_esc_backtrack_hint();
+        self.chat.clear_esc_backtrack_hint();
     }
 
     /// Handle a ConversationHistory response while a backtrack is pending.
@@ -293,7 +293,7 @@ impl App {
         nth_user_message: usize,
         prefill: String,
     ) {
-        let cfg = self.chat_widget.config_ref().clone();
+        let cfg = self.chat.config_ref().clone();
         // Perform the fork via a thin wrapper for clarity/testability.
         let result = self
             .perform_fork(ev.path.clone(), nth_user_message, cfg.clone())
@@ -338,13 +338,14 @@ impl App {
             enhanced_keys_supported: self.enhanced_keys_supported,
             auth_manager: self.auth_manager.clone(),
         };
-        self.chat_widget =
+        let widget =
             crate::chatwidget::ChatWidget::new_from_existing(init, conv, session_configured);
+        self.chat = crate::chat_host::ChatHost::single(widget);
         // Trim transcript up to the selected user message and re-render it.
         self.trim_transcript_for_backtrack(nth_user_message);
         self.render_transcript_once(tui);
         if !prefill.is_empty() {
-            self.chat_widget.set_composer_text(prefill.to_string());
+            self.chat.set_composer_text(prefill.to_string());
         }
         tui.frame_requester().schedule_frame();
     }

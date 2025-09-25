@@ -76,4 +76,19 @@ pub(crate) enum AppEvent {
 
     /// Open the custom prompt option from the review popup.
     OpenReviewCustomPrompt,
+
+    /// Open the thread manager popup (like /model).
+    OpenThreadManager,
+
+    /// Switch active thread by index (0-based; 0 is main).
+    SwitchThread(usize),
+
+    /// Create a child thread under the given parent index.
+    NewChildThread(usize),
+
+    /// Create a child thread under the current active session (fork full context).
+    ForkChildOfActive,
+
+    /// Clear the active thread's context since fork (keep pre-fork history).
+    ClearActiveThread,
 }

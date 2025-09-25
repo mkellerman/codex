@@ -18,6 +18,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
+use ratatui::widgets::Paragraph;
 use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::WidgetRef;
 
@@ -87,6 +88,7 @@ pub(crate) struct ChatComposer {
     // When true, disables paste-burst logic and inserts characters immediately.
     disable_paste_burst: bool,
     custom_prompts: Vec<CustomPrompt>,
+    footer_extra: Option<Line<'static>>,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -130,6 +132,7 @@ impl ChatComposer {
             paste_burst: PasteBurst::default(),
             disable_paste_burst: false,
             custom_prompts: Vec::new(),
+            footer_extra: None,
         };
         // Apply configuration via the setter to keep side-effects centralized.
         this.set_disable_paste_burst(disable_paste_burst);
@@ -138,10 +141,16 @@ impl ChatComposer {
 
     pub fn desired_height(&self, width: u16) -> u16 {
         // Leave 1 column for the left border and 1 column for left padding
+        let footer_height = if matches!(self.active_popup, ActivePopup::None) {
+            // Dynamic: include extra footer line if one is set.
+            FOOTER_HEIGHT_WITH_HINT + if self.footer_extra.is_some() { 1 } else { 0 }
+        } else {
+            0
+        };
         self.textarea
             .desired_height(width.saturating_sub(LIVE_PREFIX_COLS))
             + match &self.active_popup {
-                ActivePopup::None => FOOTER_HEIGHT_WITH_HINT,
+                ActivePopup::None => footer_height,
                 ActivePopup::Command(c) => c.calculate_required_height(width),
                 ActivePopup::File(c) => c.calculate_required_height(),
             }
@@ -153,7 +162,9 @@ impl ChatComposer {
                 Constraint::Max(popup.calculate_required_height(area.width))
             }
             ActivePopup::File(popup) => Constraint::Max(popup.calculate_required_height()),
-            ActivePopup::None => Constraint::Max(FOOTER_HEIGHT_WITH_HINT),
+            ActivePopup::None => Constraint::Max(
+                FOOTER_HEIGHT_WITH_HINT + if self.footer_extra.is_some() { 1 } else { 0 },
+            ),
         };
         let [textarea_rect, _] =
             Layout::vertical([Constraint::Min(1), popup_constraint]).areas(area);
@@ -864,9 +875,23 @@ impl ChatComposer {
     /// Handle generic Input events that modify the textarea content.
     fn handle_input_basic(&mut self, input: KeyEvent) -> (InputResult, bool) {
         // If we have a buffered non-bracketed paste burst and enough time has
-        // elapsed since the last char, flush it before handling a new input.
+        // elapsed since the last char, flush it before handling a new input —
+        // except for plain Char inputs. For plain Char, let the burst
+        // detector decide first so we don't prematurely insert a pending
+        // first fast char as typed text.
         let now = Instant::now();
-        self.handle_paste_burst_flush(now);
+        let is_plain_char = matches!(
+            input,
+            KeyEvent {
+                code: KeyCode::Char(_),
+                modifiers,
+                ..
+            } if !modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT)
+        );
+        if !is_plain_char {
+            self.handle_paste_burst_flush(now);
+        }
 
         // If we're capturing a burst and receive Enter, accumulate it instead of inserting.
         if matches!(input.code, KeyCode::Enter)
@@ -1229,10 +1254,15 @@ impl ChatComposer {
     pub(crate) fn set_esc_backtrack_hint(&mut self, show: bool) {
         self.esc_backtrack_hint = show;
     }
+
+    pub(crate) fn set_footer_extra_line(&mut self, line: Option<Line<'static>>) {
+        self.footer_extra = line;
+    }
 }
 
 impl WidgetRef for ChatComposer {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        let extra_height = if self.footer_extra.is_some() { 1 } else { 0 };
         let (popup_constraint, hint_spacing) = match &self.active_popup {
             ActivePopup::Command(popup) => (
                 Constraint::Max(popup.calculate_required_height(area.width)),
@@ -1240,7 +1270,7 @@ impl WidgetRef for ChatComposer {
             ),
             ActivePopup::File(popup) => (Constraint::Max(popup.calculate_required_height()), 0),
             ActivePopup::None => (
-                Constraint::Length(FOOTER_HEIGHT_WITH_HINT),
+                Constraint::Length(FOOTER_HEIGHT_WITH_HINT + extra_height),
                 FOOTER_SPACING_HEIGHT,
             ),
         };
@@ -1254,10 +1284,12 @@ impl WidgetRef for ChatComposer {
                 popup.render_ref(popup_rect, buf);
             }
             ActivePopup::None => {
+                let hint_lines =
+                    FOOTER_HINT_HEIGHT + if self.footer_extra.is_some() { 1 } else { 0 };
                 let hint_rect = if hint_spacing > 0 {
                     let [_, hint_rect] = Layout::vertical([
                         Constraint::Length(hint_spacing),
-                        Constraint::Length(FOOTER_HINT_HEIGHT),
+                        Constraint::Length(hint_lines),
                     ])
                     .areas(popup_rect);
                     hint_rect
@@ -1331,9 +1363,24 @@ impl WidgetRef for ChatComposer {
                     }
                 }
 
-                Line::from(hint)
-                    .style(Style::default().dim())
-                    .render_ref(hint_rect, buf);
+                if let Some(extra) = &self.footer_extra {
+                    // Render session status line above controls tooltips line, no spacing between them.
+                    let [extra_line, hint_line] = Layout::vertical([
+                        Constraint::Length(1),
+                        Constraint::Length(FOOTER_HINT_HEIGHT),
+                    ])
+                    .areas(hint_rect);
+                    // Session line (already styled by shim)
+                    Paragraph::new(vec![extra.clone()]).render_ref(extra_line, buf);
+                    // Controls tooltips line (dim)
+                    Line::from(hint)
+                        .style(Style::default().dim())
+                        .render_ref(hint_line, buf);
+                } else {
+                    Line::from(hint)
+                        .style(Style::default().dim())
+                        .render_ref(hint_rect, buf);
+                }
             }
         }
         let border_style = if self.has_focus {

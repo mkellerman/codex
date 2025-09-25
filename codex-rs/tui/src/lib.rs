@@ -35,6 +35,7 @@ mod app_event;
 mod app_event_sender;
 mod ascii_animation;
 mod bottom_pane;
+mod chat_host;
 mod chatwidget;
 mod citation_regex;
 mod cli;
@@ -59,10 +60,12 @@ mod render;
 mod resume_picker;
 mod session_log;
 mod shimmer;
+mod shims;
 mod slash_command;
 mod status_indicator_widget;
 mod streaming;
 mod text_formatting;
+mod threads_feature;
 mod tui;
 mod ui_consts;
 mod user_approval_widget;
@@ -137,6 +140,7 @@ pub async fn run_main(
         include_plan_tool: Some(true),
         include_apply_patch_tool: None,
         include_view_image_tool: None,
+        include_session_title_tool: Some(cli.threads),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         tools_web_search_request: cli.web_search.then_some(true),
     };
@@ -411,7 +415,26 @@ async fn run_ratatui_app(
         }
     }
 
-    let Cli { prompt, images, .. } = cli;
+    let Cli {
+        prompt,
+        images,
+        threads,
+        ..
+    } = cli;
+
+    if threads {
+        // Advertise threads-enabled to UI components that need conditional features.
+        crate::threads_feature::set_threads_enabled(true);
+    }
+
+    // Inject title-management user instructions when thread shims are enabled.
+    if threads {
+        let shim_text = "Always set and keep an accurate, specific chat title for this session/thread.\n\nAt chat start, call the tool mcp__session__change_title with a concise title (5–8 words).\n\nIf the title becomes outdated or too generic, call the tool again with a better title.\n\nTitles should reflect this session/thread, not global preferences or other chats.".to_string();
+        config.user_instructions = match config.user_instructions.take() {
+            Some(existing) => Some(format!("{existing}\n\n{shim_text}")),
+            None => Some(shim_text),
+        };
+    }
 
     let app_result = App::run(
         &mut tui,
@@ -421,6 +444,7 @@ async fn run_ratatui_app(
         prompt,
         images,
         resume_selection,
+        threads,
     )
     .await;
 

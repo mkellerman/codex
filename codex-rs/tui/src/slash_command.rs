@@ -13,6 +13,9 @@ pub enum SlashCommand {
     // DO NOT ALPHA-SORT! Enum order is presentation order in the popup, so
     // more frequently used commands should be listed first.
     Model,
+    Thread,
+    Session,
+    Clear,
     Approvals,
     Review,
     New,
@@ -34,6 +37,8 @@ impl SlashCommand {
     pub fn description(self) -> &'static str {
         match self {
             SlashCommand::New => "start a new chat during a conversation",
+            SlashCommand::Session => "manage sessions and threads",
+            SlashCommand::Clear => "clear this thread's context (keep pre-fork)",
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Review => "review my current changes and find issues",
@@ -43,6 +48,7 @@ impl SlashCommand {
             SlashCommand::Mention => "mention a file",
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Model => "choose what model and reasoning effort to use",
+            SlashCommand::Thread => "fork current session into a new thread",
             SlashCommand::Approvals => "choose what Codex can do without approval",
             SlashCommand::Mcp => "list configured MCP tools",
             SlashCommand::Logout => "log out of Codex",
@@ -60,8 +66,12 @@ impl SlashCommand {
     /// Whether this command can be run while a task is in progress.
     pub fn available_during_task(self) -> bool {
         match self {
-            SlashCommand::New
-            | SlashCommand::Init
+            // Allow creating a new session/thread while a task is running.
+            SlashCommand::New => true,
+            SlashCommand::Thread => true,
+            SlashCommand::Session => true,
+            SlashCommand::Clear => true,
+            SlashCommand::Init
             | SlashCommand::Compact
             | SlashCommand::Undo
             | SlashCommand::Model
@@ -83,11 +93,15 @@ impl SlashCommand {
 /// Return all built-in commands in a Vec paired with their command string.
 pub fn built_in_slash_commands() -> Vec<(&'static str, SlashCommand)> {
     let show_beta_features = beta_features_enabled();
+    let threads_enabled = crate::threads_feature::is_threads_enabled();
 
     SlashCommand::iter()
         .filter(|cmd| {
             if *cmd == SlashCommand::Undo {
                 show_beta_features
+            } else if *cmd == SlashCommand::Clear {
+                // Only show /clear in threads mode
+                threads_enabled
             } else {
                 true
             }

@@ -226,7 +226,12 @@ pub(crate) struct ChatWidget {
     // List of ghost commits corresponding to each turn.
     ghost_snapshots: Vec<GhostCommit>,
     ghost_snapshots_disabled: bool,
+    // Optional decorations provided by shims (header lines, status line)
+    shim_header_lines: Vec<ratatui::text::Line<'static>>,
+    shim_status_line: Option<ratatui::text::Line<'static>>,
 }
+
+// Header placement toggling removed; header remains vanilla (no sticky header rendering).
 
 struct UserMessage {
     text: String,
@@ -251,6 +256,20 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget {
+    /// Hook for shims to decorate header/status without changing core rendering paths.
+    /// When shims are inactive, callers pass empty data and nothing is shown.
+    pub(crate) fn set_shim_decorations(
+        &mut self,
+        _header_lines: Vec<ratatui::text::Line<'static>>,
+        _status_line: Option<ratatui::text::Line<'static>>,
+    ) {
+        self.shim_header_lines = _header_lines;
+        self.shim_status_line = _status_line;
+        self.bottom_pane
+            .set_footer_extra_line(self.shim_status_line.clone());
+        self.request_redraw();
+    }
+
     fn flush_answer_stream_with_separator(&mut self) {
         if let Some(mut controller) = self.stream_controller.take()
             && let Some(cell) = controller.finalize()
@@ -512,6 +531,8 @@ impl ChatWidget {
 
     fn on_web_search_begin(&mut self, _ev: WebSearchBeginEvent) {
         self.flush_answer_stream_with_separator();
+        self.bottom_pane
+            .update_status_header("web search".to_string());
     }
 
     fn on_web_search_end(&mut self, ev: WebSearchEndEvent) {
@@ -787,14 +808,15 @@ impl ChatWidget {
         let bottom_min = self.bottom_pane.desired_height(area.width).min(area.height);
         let remaining = area.height.saturating_sub(bottom_min);
 
+        // No reserved header rows; header remains vanilla.
+        let header_height = 0u16;
+        let remaining_after_header = remaining;
+
         let active_desired = self
             .active_cell
             .as_ref()
             .map_or(0, |c| c.desired_height(area.width) + 1);
-        let active_height = active_desired.min(remaining);
-        // Note: no header area; remaining is not used beyond computing active height.
-
-        let header_height = 0u16;
+        let active_height = active_desired.min(remaining_after_header);
 
         Layout::vertical([
             Constraint::Length(header_height),
@@ -858,6 +880,8 @@ impl ChatWidget {
             is_review_mode: false,
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: true,
+            shim_header_lines: Vec::new(),
+            shim_status_line: None,
         }
     }
 
@@ -919,6 +943,8 @@ impl ChatWidget {
             is_review_mode: false,
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: true,
+            shim_header_lines: Vec::new(),
+            shim_status_line: None,
         }
     }
 
@@ -928,6 +954,10 @@ impl ChatWidget {
                 .active_cell
                 .as_ref()
                 .map_or(0, |c| c.desired_height(width) + 1)
+    }
+
+    pub(crate) fn status_snapshot(&self) -> Option<String> {
+        self.bottom_pane.status_snapshot()
     }
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
@@ -1025,6 +1055,13 @@ impl ChatWidget {
             SlashCommand::New => {
                 self.app_event_tx.send(AppEvent::NewSession);
             }
+            SlashCommand::Session => {
+                self.app_event_tx.send(AppEvent::OpenThreadManager);
+            }
+            SlashCommand::Clear => {
+                // Ask App to clear this thread's context since fork (if applicable).
+                self.app_event_tx.send(AppEvent::ClearActiveThread);
+            }
             SlashCommand::Init => {
                 const INIT_PROMPT: &str = include_str!("../prompt_for_init_command.md");
                 self.submit_text_message(INIT_PROMPT.to_string());
@@ -1038,6 +1075,9 @@ impl ChatWidget {
             }
             SlashCommand::Model => {
                 self.open_model_popup();
+            }
+            SlashCommand::Thread => {
+                self.app_event_tx.send(AppEvent::ForkChildOfActive);
             }
             SlashCommand::Approvals => {
                 self.open_approvals_popup();
@@ -1170,6 +1210,8 @@ impl ChatWidget {
         self.capture_ghost_snapshot();
 
         let mut items: Vec<InputItem> = Vec::new();
+
+        // Title is controlled by the tool; do not auto-derive here.
 
         if !text.is_empty() {
             items.push(InputItem::Text { text: text.clone() });
@@ -1568,6 +1610,29 @@ impl ChatWidget {
         });
     }
 
+    pub(crate) fn open_thread_popup_with_hint(
+        &mut self,
+        items: Vec<SelectionItem>,
+        footer_hint: Option<String>,
+    ) {
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: "Manage Sessions".to_string(),
+            footer_hint: footer_hint.or_else(|| {
+                Some(crate::bottom_pane::popup_consts::STANDARD_POPUP_HINT_LINE.to_string())
+            }),
+            items,
+            is_searchable: false,
+            show_numbers: false,
+            show_current_suffix: false,
+            ..Default::default()
+        });
+    }
+
+    /// If the thread manager is open, refresh its items live.
+    pub(crate) fn refresh_thread_popup(&mut self, items: Vec<SelectionItem>) -> bool {
+        self.bottom_pane.try_refresh_selection_items(items)
+    }
+
     /// Open a popup to choose the approvals mode (ask for approval policy + sandbox policy).
     pub(crate) fn open_approvals_popup(&mut self) {
         let current_approval = self.config.approval_policy;
@@ -1927,7 +1992,24 @@ impl ChatWidget {
 
 impl WidgetRef for &ChatWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let [_, active_cell_area, bottom_pane_area] = self.layout_areas(area);
+        let [header_area, active_cell_area, bottom_pane_area] = self.layout_areas(area);
+        // Render persistent header lines at the top if provided by shims.
+        if header_area.height > 0 && !self.shim_header_lines.is_empty() {
+            for (i, line) in self.shim_header_lines.iter().enumerate() {
+                if (i as u16) >= header_area.height {
+                    break;
+                }
+                let y = header_area.y.saturating_add(i as u16);
+                let area = Rect {
+                    x: header_area.x,
+                    y,
+                    width: header_area.width,
+                    height: 1,
+                };
+                let para = ratatui::widgets::Paragraph::new(line.clone());
+                para.render(area, buf);
+            }
+        }
         (&self.bottom_pane).render(bottom_pane_area, buf);
         if !active_cell_area.is_empty()
             && let Some(cell) = &self.active_cell

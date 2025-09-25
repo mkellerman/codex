@@ -656,10 +656,13 @@ dependencies = [
 name = "codex-common"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "clap",
  "codex-core",
  "codex-protocol",
  "serde",
+ "thiserror 2.0.16",
+ "tokio",
  "toml",
 ]
 
