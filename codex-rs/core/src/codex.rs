@@ -2472,13 +2472,9 @@ async fn handle_function_call(
             let args = match serde_json::from_str::<TitleArgs>(&arguments) {
                 Ok(a) => a,
                 Err(e) => {
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id,
-                        output: FunctionCallOutputPayload {
-                            content: format!("failed to parse function arguments: {e}"),
-                            success: Some(false),
-                        },
-                    };
+                    return Err(FunctionCallError::RespondToModel(format!(
+                        "failed to parse function arguments: {e}"
+                    )));
                 }
             };
             // Notify front-end via a background event (shim will consume and update UI)
@@ -2489,13 +2485,7 @@ async fn handle_function_call(
                 }),
             };
             sess.send_event(event).await;
-            ResponseInputItem::FunctionCallOutput {
-                call_id,
-                output: FunctionCallOutputPayload {
-                    content: format!("session title updated to: {}", args.title),
-                    success: Some(true),
-                },
-            }
+            Ok(format!("session title updated to: {}", args.title))
         }
         "unified_exec" => {
             #[derive(Deserialize)]

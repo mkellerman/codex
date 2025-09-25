@@ -714,7 +714,6 @@ pub(crate) fn new_session_info(
     config: &Config,
     event: SessionConfiguredEvent,
     is_first_event: bool,
-    header_extras: Vec<Line<'static>>,
 ) -> CompositeHistoryCell {
     let SessionConfiguredEvent {
         model,
@@ -732,7 +731,6 @@ pub(crate) fn new_session_info(
             reasoning_effort,
             config.cwd.clone(),
             crate::version::CODEX_CLI_VERSION,
-            header_extras,
         );
 
         // Help lines below the header (new copy and list)
@@ -817,7 +815,6 @@ struct SessionHeaderHistoryCell {
     model: String,
     reasoning_effort: Option<ReasoningEffortConfig>,
     directory: PathBuf,
-    extras: Vec<Line<'static>>,
 }
 
 impl SessionHeaderHistoryCell {
@@ -826,14 +823,12 @@ impl SessionHeaderHistoryCell {
         reasoning_effort: Option<ReasoningEffortConfig>,
         directory: PathBuf,
         version: &'static str,
-        extras: Vec<Line<'static>>,
     ) -> Self {
         Self {
             version,
             model,
             reasoning_effort,
             directory,
-            extras,
         }
     }
 
@@ -2078,7 +2073,6 @@ mod tests {
             Some(ReasoningEffortConfig::High),
             std::env::temp_dir(),
             "test",
-            Vec::new(),
         );
 
         let lines = render_lines(&cell.display_lines(80));

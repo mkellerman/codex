@@ -143,31 +143,6 @@ impl RateLimitWarningState {
 
         let mut warnings = Vec::new();
 
-        let mut highest_secondary: Option<f64> = None;
-        while self.secondary_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.secondary_index]
-        {
-            highest_secondary = Some(RATE_LIMIT_WARNING_THRESHOLDS[self.secondary_index]);
-            self.secondary_index += 1;
-        }
-        if let Some(threshold) = highest_secondary {
-            warnings.push(format!(
-                "Heads up, you've used over {threshold:.0}% of your weekly limit. Run /status for a breakdown."
-            ));
-        }
-
-        let mut highest_primary: Option<f64> = None;
-        while self.primary_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.primary_index]
-        {
-            highest_primary = Some(RATE_LIMIT_WARNING_THRESHOLDS[self.primary_index]);
-            self.primary_index += 1;
-        }
-        if let Some(threshold) = highest_primary {
-            warnings.push(format!(
-                "Heads up, you've used over {threshold:.0}% of your 5h limit. Run /status for a breakdown."
-            ));
-
         if let Some(secondary_used_percent) = secondary_used_percent {
             let mut highest_secondary: Option<f64> = None;
             while self.secondary_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
@@ -196,7 +171,6 @@ impl RateLimitWarningState {
                     "Heads up, you've used over {threshold:.0}% of your 5h limit. Run /status for a breakdown."
                 ));
             }
-
         }
 
         warnings
@@ -316,7 +290,6 @@ impl ChatWidget {
             &self.config,
             event,
             self.show_welcome_banner,
-            self.shim_header_lines.clone(),
         ));
         if let Some(messages) = initial_messages {
             self.replay_initial_messages(messages);

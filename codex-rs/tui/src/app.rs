@@ -1005,12 +1005,8 @@ mod tests {
                 initial_messages: None,
                 rollout_path: PathBuf::new(),
             };
-            Arc::new(new_session_info(
-                app.chat.config_ref(),
-                event,
-                is_first,
-                Vec::new(),
-            )) as Arc<dyn HistoryCell>
+            Arc::new(new_session_info(app.chat.config_ref(), event, is_first))
+                as Arc<dyn HistoryCell>
         };
 
         // Simulate the transcript after trimming for a fork, replaying history, and
